@@ -1,0 +1,7 @@
+# Signing keystores — never commit (repo is public)
+/keystore/
+*.jks
+*.keystore
+
+# Local build config (contains SDK path + signing passwords)
+local.properties
