@@ -155,7 +155,21 @@ function on_frame_update()
         
         return  -- Skip other input handling during double-tap
     end
-    
+
+    -- If the user is physically touching the emulated screen (real touchscreen input),
+    -- don't let the script's virtual touch features (button-triggered touches, stick
+    -- cursor) fight over it. `buttons` above was read before any set_buttons() call this
+    -- frame (the R/L swap only touches the R/L bits), so it still reflects the real user
+    -- input, not a script override.
+    if buttons & drastic.C.BUTTON_TOUCH ~= 0 then
+        touch_state = 0  -- Cancel any pending virtual touch so it doesn't resume stale
+        current_x = 128
+        current_y = 96
+        pressed = 1
+        end_count = 0
+        return
+    end
+
     if touch_on_button(drastic.C.BUTTON_Y, 6, 20) then
         -- Open Notes
     elseif touch_on_button(drastic.C.BUTTON_X, 248, 20) then

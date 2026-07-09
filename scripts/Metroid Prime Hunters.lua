@@ -1,12 +1,13 @@
 -- Global state variables
-local current_x = 0
-local current_y = 0
+local target_x = 128  -- Where the stick is currently pushing the cursor towards
+local target_y = 96
+local current_x = 128  -- Actual cursor position, eased towards target_x/y each frame
+local current_y = 96
 
-local deadzone = 0.01  -- Stick deadzone to prevent drift
-local sensitivity = 1.5  -- Pixels per frame at full stick deflection; adjust for feel
-
-local end_count = 0
-local pressed = 0
+local deadzone = 0.005  -- Stick deadzone to prevent drift; lower = more sensitive near center
+local sensitivity = 1.1  -- Pixels added per frame at full stick deflection; lower = calmer
+local response_curve = 1.6  -- >1 softens small deflections for finer aim, full speed at max tilt
+local smoothing = 0.25  -- Lerp factor per frame towards target (0 = frozen, 1 = no smoothing)
 
 -- Touch button feature state variables
 local touch_hold_time = 10  -- Frames to hold the touch
@@ -118,7 +119,16 @@ function on_frame_update()
         
         return  -- Skip other input handling during double-tap
     end
-    
+
+    -- If the user is physically touching the emulated screen (real touchscreen input),
+    -- don't let the script's virtual touch features (button-triggered touches, stick
+    -- cursor) fight over it. `buttons` above was read before any set_buttons() call this
+    -- frame, so it still reflects the real user input, not a script override.
+    if buttons & drastic.C.BUTTON_TOUCH ~= 0 then
+        touch_state = 0  -- Cancel any pending virtual touch so it doesn't resume stale
+        return
+    end
+
     if touch_on_button(drastic.C.BUTTON_Y, 6, 20) then
         -- Open Notes
     elseif touch_on_button(drastic.C.BUTTON_X, 248, 20) then
@@ -156,24 +166,33 @@ function on_frame_update()
     local magnitude = math.sqrt(rx * rx + ry * ry) 
     
     -- If stick is active
-    if(magnitude > deadzone) then 
+    if(magnitude > deadzone) then
         -- Get buttons
         local buttons = drastic.get_buttons()
 
-        current_x = 128 + (rx * sensitivity) 
-        current_y =  96 + (ry * sensitivity) 
+        -- Response curve: raising magnitude to a power > 1 softens small deflections
+        -- (fine aim near center) while keeping full speed at max stick tilt.
+        local curved_magnitude = magnitude ^ response_curve
+        local curve_scale = (curved_magnitude / magnitude) * sensitivity
+
+        target_x = target_x + (rx * curve_scale)
+        target_y = target_y + (ry * curve_scale)
+        target_x = math.max(0, math.min(255, target_x))
+        target_y = math.max(0, math.min(191, target_y))
 
         buttons = buttons | drastic.C.BUTTON_TOUCH
-        --  buttons = buttons & ~drastic.C.BUTTON_TOUCH
         drastic.set_buttons(buttons)
-        drastic.set_touch(math.floor(current_x), math.floor(current_y))
-    else  
-        if end_count > 0 then
-            -- Get buttons
-            local buttons = drastic.get_buttons()
-            -- Release touch screen 
-            buttons = buttons & ~drastic.C.BUTTON_TOUCH 
-            drastic.set_buttons(buttons) 
-        end
+    else
+        -- Stick released: lift the touch immediately, keep target_x/y so the cursor
+        -- resumes from its last position next time the stick is pushed.
+        local buttons = drastic.get_buttons()
+        buttons = buttons & ~drastic.C.BUTTON_TOUCH
+        drastic.set_buttons(buttons)
     end
+
+    -- Ease the actual cursor towards the target every frame, whether or not the stick
+    -- is active, so releasing the stick doesn't leave the touch position stuck mid-lerp.
+    current_x = current_x + (target_x - current_x) * smoothing
+    current_y = current_y + (target_y - current_y) * smoothing
+    drastic.set_touch(math.floor(current_x), math.floor(current_y))
 end  
